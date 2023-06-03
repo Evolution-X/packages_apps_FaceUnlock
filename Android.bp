@@ -33,6 +33,7 @@ android_app {
         "default_permissions_co.aospa.sense.xml",
         "hiddenapi-whitelist-co.aospa.sense.xml",
         "privapp_whitelist_co.aospa.sense.xml",
+        "ParanoidSenseOverlay",
     ],
 
     platform_apis: true,
