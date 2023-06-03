@@ -26,7 +26,13 @@ android_app {
     ],
 
     required: [
-        "vendor.aospa.biometrics.face.required",
+        "libFaceDetectCA",
+        "libmegface",
+        "libMegviiUnlock",
+        "libMegviiUnlock-jni-1.2",
+        "default_permissions_co.aospa.sense.xml",
+        "hiddenapi-whitelist-co.aospa.sense.xml",
+        "privapp_whitelist_co.aospa.sense.xml",
     ],
 
     platform_apis: true,
@@ -35,4 +41,84 @@ android_app {
     optimize: {
         enabled: false,
     },
+}
+
+cc_prebuilt_library_shared {
+    name: "libFaceDetectCA",
+    strip: {
+        none: true,
+    },
+    target: {
+        android_arm64: { srcs: [ "lib/libFaceDetectCA.so" ] },
+    },
+
+    compile_multilib: "64",
+    check_elf_files: false,
+    prefer: true,
+}
+
+cc_prebuilt_library_shared {
+    name: "libmegface",
+    strip: {
+        none: true,
+    },
+    target: {
+        android_arm64: { srcs: [ "lib/libmegface.so" ] },
+    },
+
+    compile_multilib: "64",
+    check_elf_files: false,
+    prefer: true,
+}
+
+cc_prebuilt_library_shared {
+    name: "libMegviiUnlock",
+    strip: {
+        none: true,
+    },
+    target: {
+        android_arm64: { srcs: [ "lib/libMegviiUnlock.so" ] },
+    },
+
+    compile_multilib: "64",
+    check_elf_files: false,
+    prefer: true,
+}
+
+cc_prebuilt_library_shared {
+    name: "libMegviiUnlock-jni-1.2",
+    strip: {
+        none: true,
+    },
+    target: {
+        android_arm64: { srcs: [ "lib/libMegviiUnlock-jni-1.2.so" ] },
+    },
+
+    compile_multilib: "64",
+    check_elf_files: false,
+    prefer: true,
+}
+
+java_import {
+    name: "vendor.aospa.biometrics.face.impl",
+    jars: ["lib/vendorImplPrebuilt.jar"],
+    sdk_version: "current",
+}
+
+prebuilt_etc {
+    name: "default_permissions_co.aospa.sense.xml",
+    src: "permissions/default_permissions_co.aospa.sense.xml",
+    sub_dir: "default-permissions",
+}
+
+prebuilt_etc {
+    name: "hiddenapi-whitelist-co.aospa.sense.xml",
+    src: "permissions/hiddenapi-whitelist-co.aospa.sense.xml",
+    sub_dir: "sysconfig",
+}
+
+prebuilt_etc {
+    name: "privapp_whitelist_co.aospa.sense.xml",
+    src: "permissions/privapp_whitelist_co.aospa.sense.xml",
+    sub_dir: "permissions",
 }
