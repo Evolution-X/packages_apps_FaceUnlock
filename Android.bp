@@ -27,7 +27,7 @@ android_app {
 
     required: [
         "libFaceDetectCA",
-        "libmegface",
+        "libmegface_faceunlock",
         "libMegviiUnlock",
         "libMegviiUnlock-jni-1.2",
         "default_permissions_co.aospa.sense.xml",
@@ -59,7 +59,8 @@ cc_prebuilt_library_shared {
 }
 
 cc_prebuilt_library_shared {
-    name: "libmegface",
+    name: "libmegface_faceunlock",
+    stem: "libmegface",
     strip: {
         none: true,
     },
