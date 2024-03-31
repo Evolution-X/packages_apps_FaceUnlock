@@ -261,12 +261,12 @@ class SenseService : Service() {
             applicationContext, 0, Intent(
                 ALARM_TIMEOUT_FREEZED
             ), PendingIntent.FLAG_IMMUTABLE
-        )
+        )!!
         mLockoutTimeoutIntent = PendingIntent.getBroadcast(
             applicationContext, 0, Intent(
                 ALARM_FAIL_TIMEOUT_LOCKOUT
             ), PendingIntent.FLAG_IMMUTABLE
-        )
+        )!!
         val intentFilter = IntentFilter()
         intentFilter.addAction(ALARM_TIMEOUT_FREEZED)
         intentFilter.addAction(ALARM_FAIL_TIMEOUT_LOCKOUT)
@@ -341,24 +341,24 @@ class SenseService : Service() {
     private fun startIdleTimer() {
         mOnIdleTimer = true
         mAlarmManager!![AlarmManager.ELAPSED_REALTIME, SystemClock.elapsedRealtime() + DEFAULT_IDLE_TIMEOUT_MS] =
-            mIdleTimeoutIntent
+            mIdleTimeoutIntent!!
     }
 
     private fun cancelIdleTimer() {
         mOnIdleTimer = false
-        mAlarmManager!!.cancel(mIdleTimeoutIntent)
+        mAlarmManager!!.cancel(mIdleTimeoutIntent!!)
     }
 
     private fun startLockoutTimer() {
         val elapsedRealtime = SystemClock.elapsedRealtime() + FAIL_LOCKOUT_TIMEOUT_MS
         mOnLockoutTimer = true
         mAlarmManager!![AlarmManager.ELAPSED_REALTIME, elapsedRealtime] =
-            mLockoutTimeoutIntent
+            mLockoutTimeoutIntent!!
     }
 
     private fun cancelLockoutTimer() {
         if (mOnLockoutTimer) {
-            mAlarmManager!!.cancel(mLockoutTimeoutIntent)
+            mAlarmManager!!.cancel(mLockoutTimeoutIntent!!)
             mOnLockoutTimer = false
         }
     }
