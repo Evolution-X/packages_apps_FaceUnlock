@@ -24,6 +24,7 @@ abstract class FaceBaseActivity : AppCompatActivity() {
         ThemeHelper.trySetDynamicColor(this)
 
         mToken = intent.getByteArrayExtra(Constants.EXTRA_KEY_CHALLENGE_TOKEN)
+        mUserId = intent.getIntExtra(Intent.EXTRA_USER_ID, 0)
         if (bundle != null && mToken == null) {
             mLaunchedConfirmLock = bundle.getBoolean(Constants.EXTRA_KEY_LAUNCHED_CONFIRM)
             mToken = bundle.getByteArray(Constants.EXTRA_KEY_CHALLENGE_TOKEN)

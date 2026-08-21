@@ -20,6 +20,7 @@ import co.aospa.sense.controller.FaceEnrollController
 import co.aospa.sense.camera.CameraUtil
 import co.aospa.sense.util.Constants
 import co.aospa.sense.util.PreferenceHelper
+import co.aospa.sense.util.SenseUserContext
 import co.aospa.sense.util.Util
 import co.aospa.sense.vendor.Vendor
 import co.aospa.sense.vendor.VendorImpl
@@ -39,9 +40,11 @@ class SenseService : Service() {
     private var mCameraEnrollController: FaceEnrollController? = null
     private var mCameraManager: CameraManager? = null
     private var mSenseReceiver: ISenseServiceReceiver? = null
+    private lateinit var mUserContext: Context
     private var mPreferenceHelper: PreferenceHelper? = null
-    private var mService: SenseServiceWrapper? = null
     private var mVendorImpl: Vendor? = null
+    private val mUserStates = mutableMapOf<Int, UserState>()
+    private var mIsVendorInit = false
     private var mCameraId = 0
     private var mChallengeCount = 0
     private var mUserId = 0
@@ -58,20 +61,38 @@ class SenseService : Service() {
     private val mLockoutLock = Any()
     private val mAuthErrorLock = Any()
 
+    private data class UserState(
+        var authenticationErrorCount: Int = 0,
+        var authenticationErrorThrottleCount: Int = 0,
+        var lockoutType: Int = LOCKOUT_TYPE_DISABLED,
+        var onIdleTimer: Boolean = false,
+        var onLockoutTimer: Boolean = false,
+        var userUnlocked: Boolean = false
+    )
+
     private val mReceiver: BroadcastReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             val action = intent.action
             if (Util.IS_DEBUG_LOGGING) {
                 Log.d(TAG, "OnReceive intent = $intent")
             }
+            val userId = intent.getIntExtra(Intent.EXTRA_USER_ID, mUserId)
+            val state = mUserStates[userId]
             when (action) {
-                ALARM_TIMEOUT_FREEZED -> synchronized(mLockoutLock) {
-                    mLockoutType = LOCKOUT_TYPE_IDLE
+                ALARM_TIMEOUT_FREEZED -> if (userId == mUserId) {
+                    synchronized(mLockoutLock) { mLockoutType = LOCKOUT_TYPE_IDLE }
+                } else {
+                    state?.lockoutType = LOCKOUT_TYPE_IDLE
+                    state?.onIdleTimer = false
                 }
-                ALARM_FAIL_TIMEOUT_LOCKOUT -> {
+                ALARM_FAIL_TIMEOUT_LOCKOUT -> if (userId == mUserId) {
                     cancelLockoutTimer()
                     synchronized(mLockoutLock) { mLockoutType = LOCKOUT_TYPE_DISABLED }
                     synchronized(mAuthErrorLock) { mAuthenticationErrorCount = 0 }
+                } else {
+                    state?.lockoutType = LOCKOUT_TYPE_DISABLED
+                    state?.authenticationErrorCount = 0
+                    state?.onLockoutTimer = false
                 }
                 Intent.ACTION_SCREEN_OFF, Intent.ACTION_USER_PRESENT -> {
                     mUserUnlocked = action == Intent.ACTION_USER_PRESENT
@@ -199,7 +220,7 @@ class SenseService : Service() {
                             Constants.SHARED_KEY_ENROLL_TOKEN,
                             mEnrollToken
                         )
-                        Util.setFaceUnlockAvailable(applicationContext)
+                        Util.setFaceUnlockAvailable(mUserContext)
                         stopEnroll()
                         mSenseReceiver?.onEnrollResult(faceIds, mUserId, 0)
                     } else if (result == 19) {
@@ -239,9 +260,10 @@ class SenseService : Service() {
         return START_REDELIVER_INTENT
     }
 
-    override fun onBind(intent: Intent): IBinder? {
-        if (Util.IS_DEBUG_LOGGING) Log.i(TAG, "onBind")
-        return mService
+    override fun onBind(intent: Intent): IBinder {
+        val userId = intent.getIntExtra(Intent.EXTRA_USER_ID, UserHandle.USER_SYSTEM)
+        if (Util.IS_DEBUG_LOGGING) Log.i(TAG, "onBind for user $userId")
+        return SenseServiceWrapper(userId)
     }
 
     override fun onCreate() {
@@ -249,27 +271,11 @@ class SenseService : Service() {
         if (Util.IS_DEBUG_LOGGING) Log.i(TAG, "onCreate")
         mCameraManager = getSystemService(CameraManager::class.java)
         mCameraId = CameraUtil.getCameraId(this)
-        mService = SenseServiceWrapper()
         val handlerThread = HandlerThread(TAG, -2)
         handlerThread.start()
         mWorkHandler = FaceHandler(handlerThread.looper)
-        mPreferenceHelper = PreferenceHelper(this)
-        mVendorImpl = VendorImpl(this)
-        mUserId = Util.getUserId(this)
-        if (!Util.isFaceUnlockDisabledByDPM(this) && Util.isFaceUnlockEnrolled(this)) {
-            mWorkHandler!!.post { mVendorImpl!!.init() }
-        }
         mAlarmManager = getSystemService(AlarmManager::class.java)
-        mIdleTimeoutIntent = PendingIntent.getBroadcast(
-            applicationContext, 0, Intent(
-                ALARM_TIMEOUT_FREEZED
-            ), PendingIntent.FLAG_IMMUTABLE
-        )!!
-        mLockoutTimeoutIntent = PendingIntent.getBroadcast(
-            applicationContext, 0, Intent(
-                ALARM_FAIL_TIMEOUT_LOCKOUT
-            ), PendingIntent.FLAG_IMMUTABLE
-        )!!
+        activateUser(UserHandle.USER_SYSTEM)
         val intentFilter = IntentFilter()
         intentFilter.addAction(ALARM_TIMEOUT_FREEZED)
         intentFilter.addAction(ALARM_FAIL_TIMEOUT_LOCKOUT)
@@ -287,8 +293,65 @@ class SenseService : Service() {
         if (Util.IS_DEBUG_LOGGING) {
             Log.d(TAG, "onDestroy")
         }
-        mVendorImpl!!.release()
+        mVendorImpl?.release()
         unregisterReceiver(mReceiver)
+    }
+
+    @Synchronized
+    private fun activateUser(userId: Int) {
+        if (mPreferenceHelper != null && mUserId == userId) {
+            return
+        }
+
+        if (mPreferenceHelper != null) {
+            stopCurrentWork()
+            mWorkHandler!!.removeMessages(MSG_CHALLENGE_TIMEOUT)
+            mUserStates[mUserId] = UserState(
+                mAuthenticationErrorCount,
+                mAuthenticationErrorThrottleCount,
+                mLockoutType,
+                mOnIdleTimer,
+                mOnLockoutTimer,
+                mUserUnlocked
+            )
+            mVendorImpl?.release()
+        }
+
+        val state = mUserStates.getOrPut(userId) { UserState() }
+        mUserId = userId
+        mUserContext = SenseUserContext(this, userId)
+        mPreferenceHelper = PreferenceHelper(mUserContext)
+        mVendorImpl = VendorImpl(mUserContext)
+        mAuthenticationErrorCount = state.authenticationErrorCount
+        mAuthenticationErrorThrottleCount = state.authenticationErrorThrottleCount
+        mLockoutType = state.lockoutType
+        mOnIdleTimer = state.onIdleTimer
+        mOnLockoutTimer = state.onLockoutTimer
+        mUserUnlocked = state.userUnlocked
+        mIdleTimeoutIntent = timerIntent(ALARM_TIMEOUT_FREEZED, userId)
+        mLockoutTimeoutIntent = timerIntent(ALARM_FAIL_TIMEOUT_LOCKOUT, userId)
+        mChallenge = 0
+        mChallengeCount = 0
+        mEnrollToken = null
+        mIsAuthenticated = false
+        mIsVendorInit = false
+        mWorkHandler!!.post { initVendor() }
+    }
+
+    private fun timerIntent(action: String, userId: Int): PendingIntent =
+        PendingIntent.getBroadcast(
+            applicationContext,
+            userId,
+            Intent(action).putExtra(Intent.EXTRA_USER_ID, userId),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+    private fun initVendor() {
+        if (mIsVendorInit || Util.isFaceUnlockDisabledByDPM(mUserContext)) {
+            return
+        }
+        mVendorImpl!!.init()
+        mIsVendorInit = true
     }
 
     private fun onAuthenticated() {
@@ -422,20 +485,28 @@ class SenseService : Service() {
         cancelLockoutTimer()
     }
 
-    private inner class SenseServiceWrapper : ISenseService.Stub() {
+    private inner class SenseServiceWrapper(private val userId: Int) : ISenseService.Stub() {
+        private fun activateUser() {
+            this@SenseService.activateUser(userId)
+        }
+
         override fun getFeature(feature: Int, faceId: Int): Boolean {
+            activateUser()
             return false
         }
 
-        override fun setFeature(feature: Int, enable: Boolean, cryptoToken: ByteArray?, faceId: Int) {}
+        override fun setFeature(feature: Int, enable: Boolean, cryptoToken: ByteArray?, faceId: Int) {
+            activateUser()
+        }
 
         override fun setCallback(faceServiceReceiver: ISenseServiceReceiver?) {
             mSenseReceiver = faceServiceReceiver
         }
 
         override fun enroll(cryptoToken: ByteArray?, timeout: Int, disabledFeatures: IntArray?) {
+            activateUser()
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "enroll")
-            if (Util.isFaceUnlockDisabledByDPM(this@SenseService) || mChallenge == 0L || cryptoToken == null) {
+            if (Util.isFaceUnlockDisabledByDPM(mUserContext) || mChallenge == 0L || cryptoToken == null) {
                 val sb = StringBuilder()
                 sb.append("Could not enroll: ")
                 sb.append("hasChallenge = ")
@@ -470,6 +541,7 @@ class SenseService : Service() {
         }
 
         override fun cancel() {
+            activateUser()
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "cancel")
             mWorkHandler!!.post {
                 if (mCameraAuthController != null) {
@@ -487,9 +559,10 @@ class SenseService : Service() {
         }
 
         override fun authenticate(operationId: Long) {
+            activateUser()
             mCameraManager!!.registerAvailabilityCallback(mCameraAvailabilityCallback, mWorkHandler)
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "authenticate")
-            if (!Util.isFaceUnlockAvailable(this@SenseService) ||
+            if (!Util.isFaceUnlockAvailable(mUserContext) ||
                 ContextCompat.checkSelfPermission(
                     this@SenseService.applicationContext,
                     Manifest.permission.CAMERA
@@ -500,7 +573,7 @@ class SenseService : Service() {
                 } catch (e: RemoteException) {
                     e.printStackTrace()
                 }
-            } else if (Util.isFaceUnlockDisabledByDPM(this@SenseService)) {
+            } else if (Util.isFaceUnlockDisabledByDPM(mUserContext)) {
                 try {
                     mSenseReceiver?.onError(BiometricFaceConstants.FACE_ERROR_CANCELED, 0)
                 } catch (e: RemoteException) {
@@ -527,6 +600,7 @@ class SenseService : Service() {
         }
 
         override fun remove(biometricId: Int) {
+            activateUser()
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "remove")
             mWorkHandler!!.post {
                 val faceId: Int = mPreferenceHelper!!.getIntValueByKey(Constants.SHARED_KEY_FACE_ID)
@@ -536,7 +610,7 @@ class SenseService : Service() {
                 mVendorImpl!!.deleteFeature(faceId - 1)
                 mPreferenceHelper!!.removeSharePreferences(Constants.SHARED_KEY_FACE_ID)
                 mPreferenceHelper!!.removeSharePreferences(Constants.SHARED_KEY_ENROLL_TOKEN)
-                Util.setFaceUnlockAvailable(applicationContext)
+                Util.setFaceUnlockAvailable(mUserContext)
                 try {
                     if (biometricId == 0) {
                         mSenseReceiver?.onRemoved(intArrayOf(faceId), mUserId)
@@ -550,6 +624,7 @@ class SenseService : Service() {
         }
 
         override fun enumerate(): Int {
+            activateUser()
             val faceId: Int = mPreferenceHelper!!.getIntValueByKey(Constants.SHARED_KEY_FACE_ID)
             val faceIds = if (faceId > -1) intArrayOf(faceId) else IntArray(0)
             mWorkHandler!!.post {
@@ -573,10 +648,12 @@ class SenseService : Service() {
         }
 
         override fun getFeatureCount(): Int {
+            activateUser()
             return if (mPreferenceHelper!!.getIntValueByKey(Constants.SHARED_KEY_FACE_ID) > -1) 1 else 0
         }
 
         override fun generateChallenge(timeout: Int): Long {
+            activateUser()
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "generateChallenge + $timeout")
             if (mChallengeCount <= 0 || mChallenge == 0L) {
                 mChallenge = Random().nextLong()
@@ -588,6 +665,7 @@ class SenseService : Service() {
         }
 
         override fun revokeChallenge(): Int {
+            activateUser()
             if (Util.IS_DEBUG_LOGGING) Log.d(TAG, "revokeChallenge")
             mChallengeCount -= 1
             if (mChallengeCount <= 0 && mChallenge != 0L) {
@@ -599,9 +677,13 @@ class SenseService : Service() {
             return 0
         }
 
-        override fun getAuthenticatorId(): Int = -1
+        override fun getAuthenticatorId(): Int {
+            activateUser()
+            return -1
+        }
 
         override fun resetLockout(cryptoToken: ByteArray?) {
+            activateUser()
             resetLockoutCount()
         }
     }

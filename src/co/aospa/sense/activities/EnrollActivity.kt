@@ -202,6 +202,7 @@ open class EnrollActivity : FaceBaseActivity() {
         mSurfaceView = findViewById(R.id.camera_surface)
         mProgress = 0.0f
         mSurfaceView?.setProgress(0.0f)
+        mEnrollVendorMessage = findViewById(R.id.face_vendor_message)
         /**mSurfaceView.postDelayed(new Runnable() {
          * @Override
          * public void run() {
@@ -220,15 +221,19 @@ open class EnrollActivity : FaceBaseActivity() {
         }
         if (mToken != null && mToken!!.isNotEmpty()) {
             mFaceManager!!.enroll(
-                Util.getUserId(this),
+                mUserId,
                 mToken,
                 mEnrollmentCancel,
                 mEnrollmentCallback,
                 intArrayOf(1)
             )
         }
+        if (mUserId != Util.getUserId(this)) {
+            // The enroll request is served by the target user's service, which owns the camera.
+            // Do not open a second capture session from this process.
+            return
+        }
         mEnrollController!!.start(mCameraCallback, 15000)
-        mEnrollVendorMessage = findViewById(R.id.face_vendor_message)
     }
 
     override fun getLayout(): GlifLayout {
