@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">خدمة فتح الوجه</string>
+    <string name="face_enroll_title">ضع وجهك في وسط الكاميرا</string>
+    <string name="face_enroll_description">ابقَ ثابتًا وتأكد من وجود إضاءة جيدة</string>
+    <string name="face_try_again_title">تعذّر التقاط وجهك</string>
+    <string name="face_try_again_description">انقر أدناه للمحاولة مجددًا. في المرة القادمة، تأكد من وجود إضاءة جيدة وعدم حجب وجهك</string>
+    <string name="btn_try_again">المحاولة مجددًا</string>
+    <string name="attr_light_dark">يحتاج الوجه إلى مزيد من الضوء</string>
+    <string name="attr_light_high">الوجه شديد الإضاءة</string>
+    <string name="attr_light_shadow">على الوجه ظلال كثيرة</string>
+    <string name="unlock_failed_face_blur">الوجه ضبابي جدًا</string>
+    <string name="unlock_failed_face_large">الوجه قريب جدًا</string>
+    <string name="unlock_failed_face_multi">تم اكتشاف وجوه كثيرة</string>
+    <string name="unlock_failed_face_not_complete">تم اكتشاف جزء من الوجه فقط</string>
+    <string name="unlock_failed_face_small">الوجه بعيد جدًا</string>
+</resources>
